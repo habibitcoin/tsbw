@@ -100,7 +100,7 @@ function open_wallet()
 
 	$('status').innerHTML = 'Fee: ' + fee;
 
-	refresh(); setInterval(refresh, 60000);
+	refresh(); setInterval(refresh, 5000);
 }//____________________________________________________________________________
 
 function show_wif(){ $('wif').innerHTML = ($('wif').innerHTML == '' ? keys.wif : ''); }
