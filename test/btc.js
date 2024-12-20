@@ -136,29 +136,85 @@ btc.wif2sk = function(wif)
 	return this.base58_decode(wif).slice(1, 33); // take first 32 bytes
 };//___________________________________________________________________________
 
-btc.decode_adr = function(adr)
-{
-	try
-	{
-		var bytes = btc.base58_decode(adr), len = bytes.length;
+btc.decode_adr = function (adr) {
+	try {
+        // Attempt to decode as Bech32 (P2WPKH or P2TR)
+        const { version, data } = Bitcoin.address.fromBech32(adr);
+        const isValidBech32 = (version === 0 && data.length === 20) || (version === 1 && data.length === 32);
+        if (isValidBech32) {
+            return {
+                type: version === 0 ? 'p2wpkh' : 'p2tr',
+                version: version,
+                bytes: Array.isArray(data) ? data : Array.from(data), // Normalize to plain array
+                checksum: true // Implicit in Bech32 decoding
+            };
+        }
+    } catch (e) {
+        // Not a valid Bech32 address; fallback to Base58Check
+		console.log('Bech32 decoding failed:', adr, e);
+    }
 
-		var front = bytes.slice(0, len-4);
-		var back  = bytes.slice(   len-4);
+    try {
+        // Handle Base58Check addresses
+        const { version, hash } = Bitcoin.address.fromBase58Check(adr);
+        const checksumValid = true; // bitcoinjs-lib ensures this is valid
+        if (version === Bitcoin.networks.testnet.pubKeyHash) {
+            return {
+                type: "standard",
+                version: 0x6f, // Add version for compatibility
+                bytes: Array.from(hash), // Ensure bytes is always a plain array
+                checksum: checksumValid,
+            };
+        }
+        if (version === Bitcoin.networks.testnet.scriptHash) {
+            return {
+                type: "multisig",
+                version: 0xc4, // Add version for compatibility
+                bytes: Array.from(hash), // Ensure bytes is always a plain array
+                checksum: checksumValid,
+            };
+        }
+    } catch (e) {
+        // Invalid address
+        console.error("Invalid address:", adr, e);
+    }
 
-		var ver = front[0], checksum = SHA256(SHA256(front)).slice(0,4);
+    // Handle WIF keys (fallback to previous logic)
+    try {
+        const bytes = btc.base58_decode(adr);
+        const len = bytes.length;
+        const front = bytes.slice(0, len - 4);
+        const back = bytes.slice(len - 4);
+        const ver = front[0];
+        const checksum = SHA256(SHA256(front)).slice(0, 4);
+        const checksumValid = checksum + "" === back + "";
 
-		var a = { version: ver, type: '', bytes: front.slice(1), checksum: (checksum + '' == back + '') };
+        if (ver === 0x80 && len === 37) {
+            return {
+                type: "wifkey",
+                version: ver,
+                bytes: Array.from(front.slice(1)), // Ensure bytes is always a plain array
+                checksum: checksumValid,
+                uncompressed: true,
+            };
+        }
+        if (ver === 0x80 && len === 38 && bytes[len - 5] === 0x01) {
+            return {
+                type: "wifkey",
+                version: ver,
+                bytes: Array.from(front.slice(1, len - 1)), // Ensure bytes is always a plain array
+                checksum: checksumValid,
+                uncompressed: false,
+            };
+        }
+    } catch (e) {
+        console.error("Failed to decode WIF key:", adr, e);
+    }
 
-		if(ver == 0x6F && len == 25){ a.type = 'standard'; return a; }
-		if(ver == 0xC4 && len == 25){ a.type = 'multisig'; return a; }
+    return false;
+};
 
-		if(ver == 0x80 && len == 37                        ){ a.type = 'wifkey'; a.uncompressed =  true; return a; }
-		if(ver == 0x80 && len == 38 && bytes[len-5] == 0x01){ a.type = 'wifkey'; a.uncompressed = false; return a; }
-	}
-	catch(e){ }
-
-	return false;
-};//___________________________________________________________________________
+//___________________________________________________________________________
 
 btc.extend = function(pass)
 {
@@ -249,31 +305,49 @@ btc.new_script = function(data)
 		this.buffer = this.buffer.concat(data); this.chunks.push(data);
 
 		return true;
-	};//_______________________________________________________________________
+	};//
 
-	s.spend_to_script = function(adr)
-	{
-		var sc = btc.new_script();
-
-		adr = btc.decode_adr(adr);
-
-		if(adr.version == 5) // multisig address
-		{
-			sc.write_opcode(169); //OP_HASH160
-			sc.write_bytes (adr.bytes);
-			sc.write_opcode(135); //OP_EQUAL
+	s.spend_to_script = function (adr) {
+		const sc = btc.new_script();
+		const decoded = btc.decode_adr(adr);
+	
+		if (!decoded) {
+			throw new Error('Invalid address');
 		}
-		else // regular address
-		{
-			sc.write_opcode(118); //OP_DUP
-			sc.write_opcode(169); //OP_HASH160
-			sc.write_bytes (adr.bytes);
-			sc.write_opcode(136); //OP_EQUALVERIFY
-			sc.write_opcode(172); //OP_CHECKSIG
+	
+		console.log('Decoded address:', decoded);
+	
+		if (decoded.type === 'p2tr') {
+			console.log('Building P2TR script');
+			sc.write_opcode(0x51); // OP_1
+			if (decoded.bytes.length !== 32) {
+				throw new Error('Invalid P2TR witness program length. Expected 32 bytes.');
+			}
+			sc.write_bytes(decoded.bytes); // Push the witness program
+		} else if (decoded.type === 'p2wpkh') {
+			console.log('Building P2WPKH script');
+			sc.write_opcode(0x00); // OP_0
+			sc.write_bytes(decoded.bytes); // Push the witness program
+		} else if (decoded.type === 'standard') {
+			console.log('Building P2PKH script');
+			sc.write_opcode(0x76); // OP_DUP
+			sc.write_opcode(0xa9); // OP_HASH160
+			sc.write_bytes(decoded.bytes); // Push the public key hash
+			sc.write_opcode(0x88); // OP_EQUALVERIFY
+			sc.write_opcode(0xac); // OP_CHECKSIG
+		} else if (decoded.type === 'multisig') {
+			console.log('Building P2SH script');
+			sc.write_opcode(0xa9); // OP_HASH160
+			sc.write_bytes(decoded.bytes); // Push the script hash
+			sc.write_opcode(0x87); // OP_EQUAL
+		} else {
+			throw new Error(`Unsupported address type: ${decoded.type}`);
 		}
-
+	
+		console.log('Constructed script:', sc);
 		return sc;
-	};//_______________________________________________________________________
+	};
+	//_______________________________________________________________________
 
 	s.parse = function()
 	{
@@ -325,34 +399,38 @@ btc.new_tx = function()
 		o.script = btc.new_script(script || '');
 
 		return this.ins.push(o);
-	};//_______________________________________________________________________
-
+	};
+	
 	tx.add_output = function(address, amount)
 	{
 		var o = {}; this.amount += amount * 1;
 
 		o.value = new BigInteger('' + Math.round((amount * 1) * 1e8), 10);
-		
+		// alternative
 		o.script = btc.new_script().spend_to_script(address);
 	
 		return this.outs.push(o);
-	};//_______________________________________________________________________
+	};//______________________________________________________________________
 
-	tx.add_unspent = function(u) // [ {txid:'01ab23cc...', n:0, amount:99999, script:'76a914...'}, {...} ]
-	{
+	tx.add_unspent = function (u) {
+		console.log('Adding UTXOs:', u);
 		var total = 0;
-		                               
-		for(var i = 0; i < u.length; i++)
-		{
-			if(u[i].script.indexOf('76a914') != 0) continue; // only pay-to-pkhash
-
+	
+		for (var i = 0; i < u.length; i++) {
+			if (u[i].script.indexOf('76a914') != 0) {
+				console.warn('Skipping unsupported UTXO script:', u[i].script);
+				continue; // Only pay-to-pkhash
+			}
+	
+			console.log('Adding input for UTXO:', u[i]);
 			this.add_input(u[i].txid, u[i].n, u[i].script);
-
 			total += u[i].amount * 1;
 		}
-
-		return (total / 1e8); // amount is in satoshis
-	};//_______________________________________________________________________
+	
+		console.log('Total amount from UTXOs (BTC):', total);
+		return total / 1e8; // amount is in satoshis
+	};
+	//_______________________________________________________________________
 
 	tx.transaction_hash = function(idx) // not txid!
 	{
@@ -447,38 +525,58 @@ btc.new_tx = function()
 		return btc.bin2hex(this.serialize());
 	};//_______________________________________________________________________
 
-	tx.serialize = function(idx) // 'idx' is only used internally to get tx hash
-	{
-		if(typeof idx === 'undefined') idx = -1;
-
+	tx.serialize = function (idx) {
+		if (typeof idx === 'undefined') idx = -1;
+	
+		console.log('Serializing transaction...');
 		var b = btc.n2bytes(1, 4); // version
-		
+		console.log('Version bytes:', b);
+	
 		b = b.concat(btc.n2vint(this.ins.length));
-
-		for(var i = 0; i < this.ins.length; i++)
-		{
+		console.log('Number of inputs:', this.ins.length);
+	
+		for (var i = 0; i < this.ins.length; i++) {
 			var t = this.ins[i];
-
-			b = b.concat(btc.hex2bin(t.outpoint.hash).reverse(), btc.n2bytes(t.outpoint.index, 4));
-
-			if(idx >= 0 && idx != i) b.push(0); else b = b.concat(btc.n2vint(t.script.buffer.length), t.script.buffer);
-
+			console.log('Serializing input:', t);
+	
+			b = b.concat(
+				btc.hex2bin(t.outpoint.hash).reverse(),
+				btc.n2bytes(t.outpoint.index, 4)
+			);
+	
+			if (idx >= 0 && idx != i) {
+				b.push(0);
+			} else {
+				b = b.concat(
+					btc.n2vint(t.script.buffer.length),
+					t.script.buffer
+				);
+			}
+	
 			b = b.concat(btc.n2bytes(t.sequence, 4));
 		}
-
+	
 		b = b.concat(btc.n2vint(this.outs.length));
-
-		for(var i = 0; i < this.outs.length; i++)
-		{
+		console.log('Number of outputs:', this.outs.length);
+	
+		for (var i = 0; i < this.outs.length; i++) {
 			var t = this.outs[i];
-			
-			b = b.concat(btc.n2bytes(t.value, 8), btc.n2vint(t.script.buffer.length), t.script.buffer);
+			console.log('Serializing output:', t);
+	
+			b = b.concat(
+				btc.n2bytes(t.value, 8),
+				btc.n2vint(t.script.buffer.length),
+				t.script.buffer
+			);
 		}
-
-		b = b.concat(btc.n2bytes(0,4)); // lock time
-
+	
+		b = b.concat(btc.n2bytes(0, 4)); // lock time
+		console.log('Lock time bytes:', btc.n2bytes(0, 4));
+	
+		console.log('Serialized transaction bytes (Base64):', btoa(String.fromCharCode(...b)));
 		return b;
-	};//_______________________________________________________________________
+	};
+	//_______________________________________________________________________
 
 	tx.estimate_size = function()
 	{

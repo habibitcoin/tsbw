@@ -33,17 +33,20 @@
 	#hdr{ color: #17f; font-size:16px; font-weight:bold; line-height:42px; background-color:#ffd; background-image:url(icon.png); background-repeat:no-repeat; background-position:8px 8px; }
 
 </style>
+<script src="
+https://cdn.jsdelivr.net/npm/bitcoinjs-lib-browser@5.1.7/bitcoinjs.min.js
+"></script>
 <script language='JavaScript' type='text/javascript' src='common.js'></script>
 <script language='JavaScript' type='text/javascript' src='hashes.js'></script>
 <script language='JavaScript' type='text/javascript' src='jsbn.js'></script>
 <script language='JavaScript' type='text/javascript' src='elliptic.js'></script>
 <script language='JavaScript' type='text/javascript' src='btc.js'></script>
-<script language='JavaScript' type='text/javascript' src='backend_test.js'></script>
+<script language='JavaScript' type='text/javascript' src='backend_signet.js'></script>
 </head>
 <body>
 
 <div id=page>
-<div id=hdr>TestNet version</div>
+<div id=hdr>SigNet version</div>
 
 <form id=pass_form action="javascript:open_wallet();">
 	<br><input id=passphrase type=password placeholder="Passphrase or private key" title="Can also use compressed WIF key.">&nbsp;<button type=submit>Open</button><br>
@@ -132,48 +135,70 @@ function broadcast()
 	backend.send(signed, broadcast_cb);
 }//____________________________________________________________________________
 
-function unspent_cb(utxo)
-{
-	if(utxo !== false)
-	{
-		var total = tx.add_unspent(utxo), err = '';
-	
-		var tx_total = tx.amount + fee;
-	
-		if(total >= tx_total)
-		{
-			var change = total - tx_total;
+function unspent_cb(utxo) {
+    if (utxo !== false) {
+        console.log('Fetched UTXOs:', utxo);
 
-			if(change > 0.000001) tx.add_output(keys.adr, change);
+        // Calculate total in satoshis
+        var totalSatoshis = Math.round(tx.add_unspent(utxo) * 1e8);
+        console.log('Total input amount (satoshis):', totalSatoshis);
 
-			setTimeout(broadcast, 300);
+        // Calculate transaction total in satoshis
+        var txTotalSatoshis = Math.round((tx.amount + fee) * 1e8);
+        console.log('Transaction total (including fee, satoshis):', txTotalSatoshis);
 
-			return;
-		}
-		else err = 'Not enough money! Need ' + js.format_money(tx_total - total, 8) + ' BTC more.';
-	}
-	else err = 'Failed to get unspent outputs!';
+        if (totalSatoshis >= txTotalSatoshis) {
+            var changeSatoshis = totalSatoshis - txTotalSatoshis;
+            console.log('Change amount (satoshis):', changeSatoshis);
 
-	tx = null; js.enable_form('send_form', true); $('status').innerHTML = err;
-}//____________________________________________________________________________
+            if (changeSatoshis > 0) {
+                console.log('Adding change output to:', keys.adr);
+                tx.add_output(keys.adr, changeSatoshis / 1e8); // Convert back to BTC
+            }
 
-function send_tx()
-{
-    var dst = js.trim($('to').value), amount = parseFloat(js.trim($('amount').value));
+            console.log('Proceeding to broadcast transaction...');
+            setTimeout(broadcast, 300);
+            return;
+        } else {
+            var err = 'Not enough money! Need ' + js.format_money((txTotalSatoshis - totalSatoshis) / 1e8, 8) + ' BTC more.';
+            console.error(err);
+        }
+    } else {
+        var err = 'Failed to get unspent outputs!';
+        console.error(err);
+    }
 
-    if(dst == '' || btc.decode_adr(dst) === false || isNaN(amount) || amount < 0.0001) return;
+    tx = null;
+    js.enable_form('send_form', true);
+    $('status').innerHTML = err;
+}
 
-    if(confirm('Send ' + amount + ' BTC to ' + dst + '?'))
-    {
-       	tx = btc.new_tx();
+function send_tx() {
+    var dst = js.trim($('to').value);
+    var amount = parseFloat(js.trim($('amount').value));
 
-		tx.add_output(dst, amount);
+    console.log('Destination address:', dst);
+    console.log('Amount to send:', amount, 'BTC');
 
-    	js.enable_form('send_form', false);
+    if (dst === '' || isNaN(amount) || amount < 0.0001) {
+        console.warn('Invalid address or amount.');
+        return;
+    }
 
-		$('status').innerHTML = 'Getting unspent outputs...';
+    if (confirm('Send ' + amount + ' BTC to ' + dst + '?')) {
+        console.log('Transaction confirmed by user.');
 
-		backend.get_utxo(keys.adr, unspent_cb);
+        tx = btc.new_tx();
+        console.log('New transaction initialized.');
+
+        tx.add_output(dst, amount);
+        console.log('Added output:', { address: dst, amount: amount });
+
+        js.enable_form('send_form', false);
+        $('status').innerHTML = 'Getting unspent outputs...';
+
+        console.log('Fetching UTXOs for address:', keys.adr);
+        backend.get_utxo(keys.adr, unspent_cb);
     }
 }//____________________________________________________________________________
 
