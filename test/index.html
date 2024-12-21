@@ -33,9 +33,7 @@
 	#hdr{ color: #17f; font-size:16px; font-weight:bold; line-height:42px; background-color:#ffd; background-image:url(icon.png); background-repeat:no-repeat; background-position:8px 8px; }
 
 </style>
-<script src="
-https://cdn.jsdelivr.net/npm/bitcoinjs-lib-browser@5.1.7/bitcoinjs.min.js
-"></script>
+<script language='JavaScript' type='text/javascript' src='bitcoinjs.min.js'></script>
 <script language='JavaScript' type='text/javascript' src='common.js'></script>
 <script language='JavaScript' type='text/javascript' src='hashes.js'></script>
 <script language='JavaScript' type='text/javascript' src='jsbn.js'></script>
@@ -51,7 +49,7 @@ https://cdn.jsdelivr.net/npm/bitcoinjs-lib-browser@5.1.7/bitcoinjs.min.js
 <form id=pass_form action="javascript:open_wallet();">
 	<br><input id=passphrase type=password placeholder="Passphrase or private key" title="Can also use compressed WIF key.">&nbsp;<button type=submit>Open</button><br>
 	<br><br>Nothing is sent to our server, everything is done in the browser.<br>It gets utxo and sends signed txs via <span id=backend></span> API.
-	<br><br>You can download it from <a href='https://github.com/NxtChg/tsbw' target=_blank>github</a> and use it locally.
+	<br><br>You can download it from <a href='https://github.com/habibitcoin/tsbw' target=_blank>github</a> and use it locally.
 </form>
 
 <form id=send_form action="javascript:send_tx();">
@@ -64,7 +62,7 @@ https://cdn.jsdelivr.net/npm/bitcoinjs-lib-browser@5.1.7/bitcoinjs.min.js
 
 </div>
 
-<div id=made>Created by NxtChg<br><span style="font-size:10px">19BryCNdGs5F48J6yvw41pVSd5RDiA4j1x</span></div>
+<div id=made>Created by NxtChg, modified by Habibitcoin<br><span style="font-size:10px">19BryCNdGs5F48J6yvw41pVSd5RDiA4j1x</span></div>
 
 <script>
 

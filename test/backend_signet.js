@@ -80,5 +80,5 @@ backend.get_utxo = function(adr, cb) {
 
 backend.send = function(tx, cb) {
     this.send_cb = cb;
-    js.ajax('POST', 'https://mempool.space/signet/api/txs', tx, backend_send_cb);
+    js.ajax('POST', 'https://mempool.space/signet/api/tx', tx, backend_send_cb);
 };
